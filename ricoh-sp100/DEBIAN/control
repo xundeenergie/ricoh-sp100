@@ -1,5 +1,5 @@
 Package: ricoh-sp100
-Version: 0.1.4
+Version: 0.1.5
 Section: cups
 Priority: extra
 Architecture: all
@@ -8,5 +8,5 @@ Homepage: http://github.com/xundeenergie/ricoh-sp100
 Provides: ricoh-sp100
 Depends: ghostscript, graphicsmagick-imagemagick-compat|imagemagick, jbigkit-bin
 Recommends: inotify-tools
-Description: Support for Ricoh SP100-Series
+Description: Support for Ricoh SP100- and 200-Series
   Supports Ricoh SP 100SNF and Ricoh SP 204SNF
