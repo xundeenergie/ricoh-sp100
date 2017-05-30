@@ -21,7 +21,7 @@
 *LandscapeOrientation: Plus90
 *TTRasterizer: Type42
 *% Driver-defined attributes...
-*1284DeviceID: "MFG:MFPrinter ;MDL:Laser Pro LL;CMD:AUTOMATIC,PJL,GDI_RL;DES:MFPrinter Laser Pro LL;CLS:PRINTER;VER:v1.03e ;NS:L507124L8090042;"
+*1284DeviceID: "MFG:Ricoh ;MDL:Laser Pro LL;CMD:AUTOMATIC,PJL,GDI_RL;DES:Ricoh Aficio SP 204;CLS:PRINTER;VER:v1.03e ;NS:L507124L8090042;"
 *cupsVersion: 1.6
 *cupsModelNumber: 0
 *cupsManualCopies: False
