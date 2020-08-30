@@ -1,7 +1,19 @@
 #!/bin/bash
 
+#Next four lines must be uncommented in MacOS
+#GS=/opt/local/bin/gs
+#PBMTOJBG=/opt/local/bin/pbmtojbg
+#IDENTIFY=/opt/local/bin/identify
+#uid="/var/spool/cups/tmp/pstoricohddst-gdi-`uuidgen`"
+
+# Next four lines must be uncommented in Linux
+GS=gs
+PBMTOJBG=pbmtojbg
+IDENTIFY=identify
+uid="/tmp/pstoricohddst-gdi-`uuidgen`"
+
 # Debug mode: change to 'yes' to enable
-DEBUG=${DEBUG-no}
+DEBUG=${DEBUG+no}
 
 function log() {
     [ "${DEBUG}" = "yes" ] && echo $* | logger -t "$0[$$]"
@@ -20,58 +32,52 @@ function trapINT() {
 
 function stop() {
     log "Stop stop page";
-    echo "stop" > $uid/999999999-page.pbm
+    echo "stop" > $uid/999999999.page.pbm
 }
 
-function output_page() {
-    # Converting page to JBIG format (parameters are very special for this printer!)
-    pbmtojbg -p 72 -o 3 -m 0 -q < $page > $uid/raster.jbig
+function pageOutput() {
 
-    # Taking image size
-    jsize=`wc -c < $uid/raster.jbig`
+# Converting page to JBIG format (parameters are very special for this printer!)
+$PBMTOJBG -p 72 -o 3 -m 0 -q < $uid/$page > $uid/raster.jbig
 
-    # Taking image dimensions
-    x=($(identify -format "%w %h %[fx:mean] " $page))
-    ##
-    # The %[fx:mean] gives the average colour in the image which for
-    # monochrome is the number of white pixels divided by the size
-    #
-    # So the formula gives the number of black pixels.  The final
-    # /1 causes bc to round to the nearest integer because scale=0
-    ##
-    dots=$(echo "(${x[0]}*${x[1]}*(1-${x[2]}))/1"|bc)
-    ##
-    # FIX: toner cartridge runs out way too fast with this dots
-    #      calculation above and once it decides it's empty, you
-    #      can't force it to print.  So set dots to an artificially 
-    #      low number
-    dots=$(echo "$dots/10"|bc)
+# Taking image size
+jsize=`wc -c < $uid/raster.jbig | awk ' { printf($1); }' `
 
-    # Flushing page header
-    cat <<EOF
+# Taking image dimensions
+#read fn ft xs ys garb < <($IDENTIFY $uid/$page | tr "x" " ") #Not work under MacOS
+ident=`$IDENTIFY $uid/$page | tr "x" " "`
+xs=`echo $ident | awk ' { print $3 } '`
+ys=`echo $ident | awk ' { print $4 } '`
+log "Identified as ${xs}x${ys}"
+
+# Flushing page header
+cat <<EOF
 @PJL SET PAGESTATUS=START$e
 @PJL SET COPIES=1$e
 @PJL SET MEDIASOURCE=$mediasource$e
 @PJL SET MEDIATYPE=PLAINRECYCLE$e
 @PJL SET PAPER=$pagesize$e
-@PJL SET PAPERWIDTH=${x[0]}$e
-@PJL SET PAPERLENGTH=${x[1]}$e
+@PJL SET PAPERWIDTH=$xs$e
+@PJL SET PAPERLENGTH=$ys$e
 @PJL SET RESOLUTION=${resolution%x600}$e
 @PJL SET IMAGELEN=$jsize$e
 EOF
 
-    cat $uid/raster.jbig
+# Flushing image
+cat $uid/raster.jbig
 
-    # Flushing page footer
-    # TODO: pixelcount for toner estimate
-    cat <<EOF
-@PJL SET DOTCOUNT=$dots$e
+# Flushing page footer
+# TODO: pixelcount for toner estimate
+cat <<EOF
+@PJL SET DOTCOUNT=1132782$e
 @PJL SET PAGESTATUS=END$e
 EOF
+
+#end of pageOutput
 }
 
-function output_header() {
-    cat <<EOF
+function pjlHeader() {
+cat <<EOF
 %-12345X@PJL$e
 @PJL SET TIMESTAMP=$ddate$e
 @PJL SET FILENAME=Document$e
@@ -82,10 +88,10 @@ function output_header() {
 EOF
 }
 
-function output_footer() {
-    cat <<EOF
+function pjlFooter() {
+cat <<EOF
 @PJL EOJ$e
-%-12345X
+%-12345X$e
 EOF
 }
 
@@ -128,9 +134,9 @@ ddate="`LC_ALL=en_US.UTF-8 date '+%Y/%m/%d %H:%M:%S'`"
 # Temporary directory
 uid="/tmp/pstoricohddst-gdi-`uuidgen`"
 mkdir -p $uid
-[ "${DEBUG}" = "yes" ] && exec >$uid/output.stream #> >(tee $uid/output.stream)
+[ "${DEBUG}" = "yes" ] && exec >$uid/output.stream #> >(tee $uid/output.stream) #does not work under MacOS
 
-[ -x "$(which inotifywait)" ] && {
+if [ -x "$(which inotifywait)" ]; then {
 	log "Asynchronous variant"
 
 	(
@@ -139,51 +145,60 @@ mkdir -p $uid
 	    log "Page submitted"
 	    [ "$stage" = "empty" ] && {
 		log "1st stage. Flushing PJL header"
-		output_header
+		pjlHeader;
+
 		stage="printing"
 	    }
-	    [ "$page" = "999999999-page.pbm" ] && { 
+	    [ "$page" = "999999999.page.pbm" ] && { 
 		log "Last stage. Flushing PJL footer"
-		output_footer
+		pjlFooter;
+		
 		pid=`ps ax | grep $uid | grep -v grep | awk ' { print $1 } '`
 		[ ! "x$pid" = "x" ] && kill $pid
 		break
 	    }
 	    [ "$stage" = "printing" ] && {
-		page=$uid/$page
-		output_page
+		pageOutput;
 	    }
 	done
 	) &
 
 	# Converting from PostScript to PostScript-monochrome, then to PBM image format (per page)
-	#gs -sDEVICE=ps2write -sOutputFile=- -r$resolution -dQUIET -dBATCH -dNOPAUSE - | 
-	gs -sDEVICE=pbmraw -sOutputFile=${uid}/%03d-page.pbm -r$resolution -dQUIET -dBATCH -dNOPAUSE -
+	#$GS -sDEVICE=ps2write -sOutputFile=- -r$resolution -dQUIET -dBATCH -dNOPAUSE - | 
+	$GS -sDEVICE=pbmraw -sOutputFile=${uid}/%03d.page.pbm -r$resolution -dQUIET -dBATCH -dNOPAUSE -
 
 	stop
 	wait
 
 	trapINT
-} || {
+    }
+else  {
 	log "Synchronous variant"
+	mkdir ${uid}/gs-temp
+        export TEMP=${uid}/gs-temp
 
 	# Converting from PostScript to PostScript-monochrome, then to PBM image format (per page)
 	log "Converting document to pages"
-	gs -sDEVICE=ps2write -sOutputFile=- -r$resolution -dQUIET -dBATCH -dNOPAUSE - | gs -sDEVICE=pbmraw -sOutputFile=${uid}/%03d-page.pbm -r$resolution -dQUIET -dBATCH -dNOPAUSE -
+	$GS -sDEVICE=ps2write -sOutputFile=- -r$resolution -dQUIET -dBATCH -dNOPAUSE - | $GS -sDEVICE=pbmraw -sOutputFile=${uid}/%03d.page.pbm -r$resolution -dQUIET -dBATCH -dNOPAUSE -
 	log "Conversion complete"
 
-	output_header
+	pjlHeader;
 
-	for page in ${uid}/*-page.pbm; do
-	    output_page
+	ls -1 $uid | grep "page.pbm" | while read page; do
+	#for page in ${uid}/*.page.pbm; do #looks untested - does not work
+		log "Page $page"
+		
+		pageOutput;
+
 	done
 
 	# Flushing PJL footer
-	output_footer
-
-}
-
-# only remove the output dir if not debugging
-[ ! "${DEBUG}" = "yes" ] && rm -rf $uid;
+	pjlFooter;
+	
+	if [ ! "${DEBUG}" = "yes" ]; then
+	    rm -rf $uid
+	fi
+    }
+fi
 
 exit 0
